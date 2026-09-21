@@ -1,58 +1,99 @@
 # ICD-10 Retrieval-Grounded Coding Pipeline
 
-A Streamlit app + Snowflake backend that uses Cortex AI to extract ICD-10 codes from clinical narratives, grounded in real CMS reference codes (no hallucinated codes).
+An end-to-end ICD-10 medical coding system built on Snowflake Cortex AI. Extracts diagnoses from clinical encounter narratives, assigns real ICD-10-CM codes (grounded, never hallucinated), and evaluates accuracy against ground truth.
 
-## Quick Start
+## Repository Structure
 
-1. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+```
+icd10_coding/
+├── app/                          Streamlit dashboard for reviewing results
+│   ├── app.py                      7-page app (Dashboard, Action Queue, Encounter Review, etc.)
+│   ├── setup.sql                   Snowflake DDL for app backend (tables, views, procs, tasks)
+│   └── requirements.txt            Python dependencies
+│
+├── pipeline/                     Data processing pipeline (notebooks)
+│   ├── setup.sql                   Snowflake DDL for pipeline environment
+│   ├── setup.py                    Automated setup script (Snowpark)
+│   └── notebooks/
+│       ├── 00_setup.ipynb            Parse encounters, build enriched ICD-10 corpus
+│       ├── 01_extraction.ipynb       LLM extraction of clinical findings
+│       ├── 02_search.ipynb           Multi-path ICD-10 candidate retrieval (Cortex Search)
+│       ├── 03_matching.ipynb         LLM code assignment with confidence scoring
+│       ├── 04_evaluation.ipynb       Evaluate pipeline against ground truth
+│       └── 05_run_experiment.ipynb   Consolidated end-to-end runner
+│
+├── data/                         Input data (parquet files)
+│   ├── encounters_*.parquet          1,340 clinical encounters with narratives
+│   ├── ground_truth_*.parquet        2,275 validated ICD-10 assignments
+│   ├── icd10_codes_*.parquet         74,260 ICD-10-CM codes (full reference)
+│   ├── icd10_hcc_mappings_*.parquet  11,866 ICD-10 to HCC mappings (CMS FY2026)
+│   └── hcc_mappings_*.parquet        20,500 HCC category/RAF coefficients
+│
+└── .cortex/skills/               CoCo skills for guided setup
+    ├── setup-app.md                 Walks through app deployment
+    └── setup-pipeline.md            Walks through pipeline setup
+```
 
-2. **Configure `setup.sql`** — replace `{{DATABASE}}` and `{{WAREHOUSE}}` with your values
+## What You Can Do
 
-3. **Run the SQL setup:**
-   ```bash
-   snow sql -f setup.sql
-   ```
+### Option 1: Run the Pipeline Only
 
-4. **Load ICD-10 reference data** into `ICD10_HCC_MAPPINGS` (see skill docs for details)
+Process clinical encounters through the AI coding pipeline and evaluate accuracy.
 
-5. **Edit `app.py`** — update the CONFIG section at the top with your database name and branding
+1. Set up the Snowflake environment using `pipeline/setup.sql`
+2. Load the included parquet data from `data/`
+3. Run the notebooks in order (00 through 04)
 
-6. **Run the app:**
-   ```bash
-   streamlit run app.py
-   ```
+**CoCo shortcut:** Open this repo in Cortex Code and reference the `setup-pipeline` skill.
 
-For detailed instructions, use the CoCo skill: open this project in Cortex Code and type `/setup-icd10-app`.
+### Option 2: Run the App Only
 
-## What's Included
+Deploy the Streamlit dashboard to review AI-assigned codes, manage action queues, and track costs.
 
-| File | Purpose |
-|---|---|
-| `app.py` | Streamlit app (7 pages: Dashboard, Action Queue, Encounter Review, ICD-10 Reference, Pipeline, Costs, Upload) |
-| `setup.sql` | All Snowflake DDL: database, tables, views, stored procedures, Cortex Search service, task DAG |
-| `requirements.txt` | Python dependencies |
-| `.cortex/skills/setup-icd10-app.md` | CoCo skill with full setup + customization guide |
-| `sample_data/` | Place your JSONL encounter files and ICD-10 reference CSV here |
+1. Set up the Snowflake backend using `app/setup.sql`
+2. Load ICD-10 reference data (from `data/` or CMS.gov)
+3. Run `streamlit run app/app.py`
+
+**CoCo shortcut:** Open this repo in Cortex Code and reference the `setup-app` skill.
+
+### Option 3: Run Both
+
+Run the pipeline first to process the included 1,340 encounters, then spin up the app to review results interactively. The pipeline populates the same `CHART_REVIEW_DB` database that the app reads from.
+
+1. Follow the pipeline setup (Option 1)
+2. Then follow the app setup (Option 2) — the data is already loaded
 
 ## Architecture
 
 ```
-JSONL files → Upload page → @ENCOUNTER_STAGE → Stream detects INSERT
-    ↓
-Step 1: AI_COMPLETE (claude-sonnet) extracts diagnoses from narratives
-    ↓
-Step 2: Cortex Search retrieves top-10 real ICD-10 candidate codes
-    ↓
-Step 3: AI_COMPLETE picks single best-fit code (MUST be from candidate list)
-    ↓
-Serving view: flags MISSED_REVENUE where RA codes found in notes but not billed
+Clinical encounter JSONL/parquet
+    │
+    ▼
+Step 1: EXTRACT — Cortex AI (claude-sonnet) extracts diagnoses from narratives
+    │
+    ▼
+Step 2: SEARCH — Cortex Search retrieves top-10 real ICD-10-CM candidate codes
+    │
+    ▼
+Step 3: MATCH — Cortex AI picks the single best-fit code (MUST be from candidates)
+    │
+    ▼
+Step 4: EVALUATE — Compare against ground truth with LLM judge
+    │
+    ▼
+Streamlit App — Dashboard, Action Queue, Encounter Review, Cost Calculator
 ```
 
-## Requirements
+Every assigned code is a real CMS billable code — the retrieval-grounded approach ensures no hallucinated codes.
 
-- Snowflake account with Cortex AI enabled
-- Python 3.9+
-- Snowflake CLI (`snow`) or `connections.toml` configured
+## Prerequisites
+
+- Snowflake account with **Cortex AI** enabled
+- `ACCOUNTADMIN` role (or equivalent)
+- A warehouse (default: `COMPUTE_WH`)
+- Python 3.9+ (for the Streamlit app)
+- Snowflake CLI (`snow`) configured
+
+## License
+
+Internal use only.
