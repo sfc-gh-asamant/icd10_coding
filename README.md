@@ -94,6 +94,91 @@ Every assigned code is a real CMS billable code — the retrieval-grounded appro
 - Python 3.9+ (for the Streamlit app)
 - Snowflake CLI (`snow`) configured
 
+## Getting Started
+
+### Setting Up the Pipeline
+
+The pipeline loads the included sample data (1,340 encounters + ground truth) into Snowflake, then runs a sequence of notebooks that extract diagnoses, retrieve candidate ICD-10 codes, assign best-fit codes, and evaluate accuracy.
+
+**Using the CoCo skill (recommended):**
+
+1. Clone this repo and open it in [Cortex Code](https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code)
+2. Reference the **`setup-pipeline`** skill — it will walk you through every step interactively, including configuring your warehouse/role, uploading data, loading tables, and running notebooks in order
+
+**Manual setup:**
+
+1. Edit `pipeline/setup.sql` — set your `WAREHOUSE_NAME` and `ROLE_NAME` at the top
+2. Run the SQL to create databases, schemas, tables, and the data loading stage:
+   ```bash
+   snow sql -f pipeline/setup.sql
+   ```
+3. Upload the parquet files from `data/` to the stage:
+   ```sql
+   PUT file:///path/to/data/encounters_*.snappy.parquet
+       @CHART_REVIEW_DB.RAW.DATA_LOAD_STAGE/encounters/ AUTO_COMPRESS=FALSE;
+   -- repeat for ground_truth, icd10_hcc_mappings, icd10_codes, hcc_mappings
+   ```
+   Or use the automated script in a Snowflake notebook:
+   ```python
+   from pipeline.setup import run_setup
+   run_setup(session, data_dir="/path/to/data")
+   ```
+4. Run the COPY INTO statements (Section 4 of `pipeline/setup.sql`) and verify row counts
+5. Upload notebooks from `pipeline/notebooks/` to a Snowflake workspace and run in order:
+   - `00_setup.ipynb` (always first — creates derived tables)
+   - `01_extraction.ipynb` through `04_evaluation.ipynb` in sequence
+   - Or use `05_run_experiment.ipynb` to run steps 01–04 in one shot
+
+### Setting Up the App
+
+The Streamlit app provides a dashboard for reviewing AI-assigned codes, managing an action queue with accept/reject workflow, inspecting individual encounters with evidence highlighting, and projecting costs at scale.
+
+**Using the CoCo skill (recommended):**
+
+1. Clone this repo and open it in [Cortex Code](https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code)
+2. Reference the **`setup-app`** skill — it will guide you through configuring your database, loading reference data, customizing branding, and running the app
+
+**Manual setup:**
+
+1. Install Python dependencies:
+   ```bash
+   pip install -r app/requirements.txt
+   ```
+2. Edit `app/setup.sql` — find-and-replace `{{DATABASE}}` with your database name and `{{WAREHOUSE}}` with your warehouse name
+3. Run the SQL to create the app backend (tables, views, stored procedures, Cortex Search service, task DAG):
+   ```bash
+   snow sql -f app/setup.sql
+   ```
+4. Load ICD-10 reference data into the `ICD10_HCC_MAPPINGS` table. If you already ran the pipeline setup, this table is already populated. Otherwise, load from the included `data/icd10_hcc_mappings_*.parquet` or download from CMS.gov.
+5. Edit the CONFIG section at the top of `app/app.py` — set your `DATABASE` name and customize branding (`BRAND_NAME`, `BRAND_COLOR`, etc.)
+6. Run the app:
+   ```bash
+   streamlit run app/app.py
+   ```
+7. Upload encounter data via the **Upload** page, or use the data already loaded by the pipeline
+
+### Setting Up Both (Pipeline + App)
+
+To get the full experience — process encounters through the pipeline, then review results in the app:
+
+1. **Run the pipeline setup first** (see above) — this loads all data and processes encounters through the AI coding pipeline
+2. **Then run the app setup** — since the pipeline already created `CHART_REVIEW_DB` and loaded data, the app setup only needs to add its views, stored procedures, and task DAG on top
+3. Edit `app/setup.sql` to use `CHART_REVIEW_DB` as the `{{DATABASE}}` value, then run it
+4. Start the app with `streamlit run app/app.py`
+
+The pipeline and app share the same `CHART_REVIEW_DB` database, so pipeline results are immediately visible in the app.
+
+## CoCo Skills Reference
+
+This repo includes two [Cortex Code](https://docs.snowflake.com/en/user-guide/cortex-code/cortex-code) skills in `.cortex/skills/` that provide step-by-step guided setup:
+
+| Skill | File | What It Does |
+|-------|------|-------------|
+| **setup-pipeline** | `.cortex/skills/setup-pipeline.md` | Walks through pipeline environment setup, data loading, and notebook execution |
+| **setup-app** | `.cortex/skills/setup-app.md` | Walks through app backend setup, branding customization, and deployment |
+
+To use a skill: clone the repo, open it in Cortex Code, and reference the skill name in conversation. The agent will guide you through each step interactively.
+
 ## License
 
 Internal use only.
